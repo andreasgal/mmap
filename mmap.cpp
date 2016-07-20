@@ -76,7 +76,7 @@ NAN_METHOD(Unmap) {
 		ok = false;
 	} else {
 		d->length = 0;
-    buffer->Set(Nan::New("length").ToLocalChecked(), Nan::New<Number>(0));
+    v8::Uint8Array::Cast(*buffer)->Buffer()->Neuter();
 	}
 
 	info.GetReturnValue().Set(ok ? True() : False());
