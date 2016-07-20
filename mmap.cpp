@@ -8,14 +8,20 @@
 #include <unistd.h>
 #include <errno.h>
 
+using v8::External;
 using v8::FunctionTemplate;
 using v8::Local;
 using v8::Number;
 using v8::Object;
 using v8::String;
+using v8::Uint8Array;
+using v8::Value;
 
+using Nan::ErrnoException;
 using Nan::False;
+using Nan::New;
 using Nan::NewBuffer;
+using Nan::ThrowError;
 using Nan::True;
 
 struct hint_wrap {
@@ -23,7 +29,7 @@ struct hint_wrap {
 };
 
 static void Map_finalise(char *data, void *hint_void) {
-	struct hint_wrap *h = (struct hint_wrap *) hint_void;
+	hint_wrap *h = (hint_wrap *) hint_void;
 
 	if (h->length > 0) {
 		munmap(data, h->length);
@@ -33,13 +39,15 @@ static void Map_finalise(char *data, void *hint_void) {
 }
 
 static NAN_METHOD(Sync) {
-  Local<Object> buffer = info.This()->ToObject();
-	char *data = node::Buffer::Data(buffer);
-	size_t length = node::Buffer::Length(buffer);
+  Local<Value> self = info.This();
+  if (!node::Buffer::HasInstance(self))
+    return;
+  char *data = node::Buffer::Data(self);
+  size_t length = node::Buffer::Length(self);
 
 	// First optional argument: offset
-  if (info.Length() > 0) {
-		const size_t offset = info[0]->ToInteger()->Value();
+  if (info.Length() > 0 && info[0]->IsNumber()) {
+		const size_t offset = size_t(info[0]->ToNumber()->Value());
 		if (length <= offset)
       return;
 		data += offset;
@@ -47,67 +55,71 @@ static NAN_METHOD(Sync) {
 	}
 
 	// Second optional argument: length
-	if (info.Length() > 1) {
-		const size_t range = info[1]->ToInteger()->Value();
+	if (info.Length() > 1 && info[1]->IsNumber()) {
+		const size_t range = size_t(info[1]->ToNumber()->Value());
 		if (range < length)
       length = range;
 	}
 
 	// Third optional argument: flags
 	int flags;
-	if (info.Length() > 2) {
+	if (info.Length() > 2 && info[2]->IsNumber()) {
 		flags = info[2]->ToInteger()->Value();
 	} else {
 		flags = MS_SYNC;
 	}
 
-	info.GetReturnValue().Set((0 == msync(data, length, flags)) ? Nan::True() : Nan::False());
+	info.GetReturnValue().Set((0 == msync(data, length, flags)) ? True() : False());
 }
 
 NAN_METHOD(Unmap) {
-	Local<Object> buffer = info.This()->ToObject();
-	char *data = node::Buffer::Data(buffer);
+  Local<Value> self = info.This();
+  if (!node::Buffer::HasInstance(self))
+    return;
+  Local<Object> buffer = info.This()->ToObject();
+  char *data = node::Buffer::Data(self);
 
-	struct hint_wrap *d = (struct hint_wrap *) v8::External::Cast(*buffer->GetHiddenValue(Nan::New("mmap_dptr").ToLocalChecked()))->Value();
-
-	bool ok = true;
+	hint_wrap *d = (hint_wrap *) External::Cast(*buffer->GetHiddenValue(New("mmap_dptr").ToLocalChecked()))->Value();
 
 	if (d->length > 0 && -1 == munmap(data, d->length)) {
-		ok = false;
-	} else {
-		d->length = 0;
-    v8::Uint8Array::Cast(*buffer)->Buffer()->Neuter();
-	}
+    info.GetReturnValue().Set(False());
+    return;
+  }
 
-	info.GetReturnValue().Set(ok ? True() : False());
+  d->length = 0;
+  v8::Uint8Array::Cast(*buffer)->Buffer()->Neuter();
+  info.GetReturnValue().Set(True());
 }
 
 NAN_METHOD(Map) {
-	if (info.Length() <= 3) {
-    Nan::ThrowError("mmap() takes 4 arguments: size, protection, flags, fd and offset.");
+	if (info.Length() <= 3 || !info[0]->IsNumber() || !info[1]->IsNumber() || !info[2]->IsNumber() || !info[3]->IsNumber()) {
+    ThrowError("mmap() takes 5 arguments: size, protection, flags, fd and offset.");
 		return;
 	}
 
-	const size_t length  = info[0]->ToInteger()->Value();
-	const int protection = info[1]->ToInteger()->Value();
-	const int flags      = info[2]->ToInteger()->Value();
-	const int fd         = info[3]->ToInteger()->Value();
-	const off_t offset   = info[4]->ToInteger()->Value();
+	size_t length = size_t(info[0]->ToNumber()->Value());
+	int protection = info[1]->ToInteger()->Value();
+	int flags = info[2]->ToInteger()->Value();
+	int fd = info[3]->ToInteger()->Value();
+
+	off_t offset   = 0;
+  if (info.Length() > 4 && info[4]->IsNumber())
+    offset = off_t(info[4]->ToNumber()->Value());
 
 	char* data = (char *) mmap(0, length, protection, flags, fd, offset);
 
 	if (data == MAP_FAILED) {
-    Nan::ErrnoException(errno, "mmap");
+    ErrnoException(errno, "mmap");
 		return;
 	}
 
-	struct hint_wrap *d = new hint_wrap;
+  hint_wrap *d = new hint_wrap;
 	d->length = length;
 
   Local<Object> buffer = NewBuffer(data, length, Map_finalise, (void *)d).ToLocalChecked();
-  buffer->Set(Nan::New("unmap").ToLocalChecked(), Nan::New<FunctionTemplate>(Unmap)->GetFunction());
-  buffer->Set(Nan::New("sync").ToLocalChecked(), Nan::New<FunctionTemplate>(Sync)->GetFunction());
-  buffer->SetHiddenValue(Nan::New("mmap_dptr").ToLocalChecked(), Nan::New<v8::External>((void *)d));
+  buffer->Set(New("unmap").ToLocalChecked(), New<FunctionTemplate>(Unmap)->GetFunction());
+  buffer->Set(New("sync").ToLocalChecked(), New<FunctionTemplate>(Sync)->GetFunction());
+  buffer->SetHiddenValue(New("mmap_dptr").ToLocalChecked(), New<v8::External>((void *)d));
 
   info.GetReturnValue().Set(buffer);
 }
