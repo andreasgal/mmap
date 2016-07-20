@@ -1,13 +1,21 @@
 {
-    "name": "mmap",
-    "description": "mmap() fds into buffers",
-    "license": "BSD",
-    "version": "3.0.0",
-    "engines":{"node": "5.x.x"},
-    "main": "./index.js",
-    "repository": { "type": "git", "url": "https://github.com/geocar/mmap.git" },
-    "scripts": { 
-	"pretest": "npm build .",
-        "test": "node --expose-gc run_tests.js"
-    }
+  "name": "mmap",
+  "description": "mmap() fds into buffers",
+  "license": "BSD",
+  "version": "3.0.0",
+  "engines": {
+    "node": "4.4.0"
+  },
+  "main": "./index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/geocar/mmap.git"
+  },
+  "scripts": {
+    "pretest": "npm build .",
+    "test": "node --expose-gc run_tests.js"
+  },
+  "dependencies": {
+    "nan": "^2.4.0"
+  }
 }
